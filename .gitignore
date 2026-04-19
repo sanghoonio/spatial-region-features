@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment / local config
+.env
+.env.local
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Experiment artifacts — regenerable from source code or remote data
+# Applied at any depth under the workspace (scratch/, future experiment dirs).
+# Override for specific small files with `git add -f <path>` if genuinely worth tracking.
+**/data/
+**/results/
+**/outputs/
+**/logs/
+**/checkpoints/
+**/wandb/
+**/figures/
+
+# SLURM / HPC logs
+slurm-*.out
+*.slurm.out
+*.slurm.log

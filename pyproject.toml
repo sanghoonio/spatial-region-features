@@ -1,0 +1,20 @@
+[project]
+name = "spatial-region-features"
+version = "0.1.0"
+description = "Research workspace for within-universe spatial features"
+requires-python = ">=3.13"
+dependencies = [
+    # bigwig + region handling (also used by scratch)
+    "pybigwig>=0.3.25",
+    "pyranges>=0.1.4",
+    "gtars>=0.8.0",
+    "deeptools>=3.5.6",
+    "jupyter>=1.1.1",
+    # analysis (plans)
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
+    "umap-learn>=0.5",
+]

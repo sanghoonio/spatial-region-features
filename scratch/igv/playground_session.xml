@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Session genome="hg38" locus="chr22:30,000,000-32,000,000" version="8">
+    <Resources>
+        <Resource name="K562 ATAC-seq" path="../data/K562_ATAC_chr22.bw"/>
+        <Resource name="K562 H3K27ac" path="../data/K562_H3K27ac_chr22.bw"/>
+        <Resource name="K562 H3K4me1" path="../data/K562_H3K4me1_chr22.bw"/>
+        <Resource name="cCREs (chr22)" path="../data/hg38_cCRE_chr22.bed"/>
+    </Resources>
+    <Panel height="200" name="DataPanel" width="1400">
+        <Track attributeKey="K562 ATAC-seq" autoScale="true" clazz="org.broad.igv.track.DataSourceTrack"
+               color="102,102,204" displayMode="COLLAPSED" id="../data/K562_ATAC_chr22.bw"
+               name="K562 ATAC" renderer="BAR_CHART" visible="true" windowFunction="mean">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="50.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="K562 H3K27ac" autoScale="true" clazz="org.broad.igv.track.DataSourceTrack"
+               color="204,102,102" displayMode="COLLAPSED" id="../data/K562_H3K27ac_chr22.bw"
+               name="K562 H3K27ac" renderer="BAR_CHART" visible="true" windowFunction="mean">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="50.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+        <Track attributeKey="K562 H3K4me1" autoScale="true" clazz="org.broad.igv.track.DataSourceTrack"
+               color="102,204,102" displayMode="COLLAPSED" id="../data/K562_H3K4me1_chr22.bw"
+               name="K562 H3K4me1" renderer="BAR_CHART" visible="true" windowFunction="mean">
+            <DataRange baseline="0.0" drawBaseline="true" flipAxis="false" maximum="50.0" minimum="0.0" type="LINEAR"/>
+        </Track>
+    </Panel>
+    <Panel height="100" name="FeaturePanel" width="1400">
+        <Track attributeKey="cCREs (chr22)" clazz="org.broad.igv.track.FeatureTrack"
+               color="150,150,150" displayMode="COLLAPSED" id="../data/hg38_cCRE_chr22.bed"
+               name="ENCODE cCREs" visible="true"/>
+    </Panel>
+    <PanelLayout dividerFractions="0.6,0.9"/>
+</Session>
