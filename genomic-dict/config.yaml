@@ -1,0 +1,401 @@
+# genomic-dict pipeline config
+#
+# This file is the methods section for the pipeline. Every parameter that
+# affects a result should live here. Scripts read their own [stages.<name>]
+# section and log the resolved section to each stage's summary.json.
+#
+# Commit this file when you're happy with a set of params. The git log is
+# the record of what was tried.
+
+project:
+  name: "genomic-dict"
+  description: "Interactive regulatory genomics dictionary — course data-viz project"
+
+# All paths are relative to genomic-dict/ (the project root).
+paths:
+  data_dir: "data"
+  corpus_dir: "data/corpus"
+  universe_dir: "data/universe"
+  annotations_dir: "data/annotations"
+  precomputed_dir: "data/precomputed"
+  hf_cache_dir: "data/hf_cache"
+  results_dir: "results"
+  models_dir: "models"
+  logs_dir: "logs"
+
+# Chromosome scope for visualization-facing steps (annotations, precompute).
+# R2V training itself uses the genome-wide universe — see stages.05_train_r2v.
+# Picked chr16 for the FTO/IRX3 featured entry (the canonical "nearest gene
+# is wrong" case — reinforces the viz's intrinsic-vs-extrinsic argument).
+focus_chromosome: "chr16"
+
+# Tissues and marks — shared by intrinsic-annotation extraction.
+tissues:
+  - "K562"
+  - "GM12878"
+  - "HepG2"
+
+histone_marks:
+  - "H3K4me1"
+  - "H3K4me3"
+  - "H3K27ac"
+  - "H3K27me3"
+  - "H3K9me3"
+
+stages:
+  # Stage 00 — inspect HF metadata parquets, report columns + distributions
+  # so we can pick stage 01 filter criteria.
+  00_inspect_metadata:
+    hf_repo: "databio/bedbase-umap"
+    hf_files:
+      - "hg38_meta_t1.parquet"
+      - "hg38_meta_t2.parquet"
+      - "hg38_umap_all_3_13.parquet"
+    # Max cardinality to show full value counts for a string column.
+    top_values_max_unique: 500
+    top_values_n: 10
+
+  # Stage 01 — filter 420k UMAP corpus → ~17k balanced-cap manifest.
+  # Filter:  5 main assays + cell_line known. Yields 84,698 survivors.
+  # Cap:     balanced per-assay (default 4,000), so each assay shows up real
+  #          in the file UMAP. Histone ChIP-seq has only 799 in the pool —
+  #          kept entire.
+  # Reserve: top-5-by-quality files for each (cell_line, target) cell in the
+  #          stage-10 featured grid are pinned BEFORE the cap is applied, so
+  #          rare combinations like (HepG2, H3K9me3) survive the random cut.
+  # Quality: count of populated rich-meta fields (description, cell_type,
+  #          tissue, treatment, target, antibody) used as tiebreak.
+  01_curate_corpus:
+    source_parquet: "databio__bedbase-umap/hg38_umap_all_3_13.parquet"
+    rich_metadata_t1: "databio__bedbase-umap/hg38_meta_t1.parquet"
+    rich_metadata_t2: "databio__bedbase-umap/hg38_meta_t2.parquet"
+    allowed_assays:
+      - "DNase-seq"
+      - "ATAC-seq"
+      - "ChIP-seq"
+      - "TF ChIP-seq"
+      - "Histone ChIP-seq"
+    cell_line_unknown_marker: "UNKNOWN"
+    per_assay_cap: 4000
+    reserve_per_featured_cell: 5
+
+  # Stage 02 — SCREEN V4 cCRE universe (genome-wide), chr9 subset tagged.
+  # V4 has 8 classes; we keep the 5 that map to the original plan's taxonomy
+  # (V3's CTCF-only → V4 CA-CTCF; V3's DNase-H3K4me3 → V4 CA-H3K4me3).
+  # To include the other 3 (CA, CA-TF, TF), add them to allowed_classes.
+  02_prepare_universe:
+    source_url: "https://downloads.wenglab.org/Registry-V4/GRCh38-cCREs.bed"
+    # BED columns in V4: chrom, start, end, accession_hex, accession_5group, class.
+    allowed_classes:
+      - "PLS"
+      - "pELS"
+      - "dELS"
+      - "CA-CTCF"
+      - "CA-H3K4me3"
+
+  # Stage 03 — fetch ENCODE bigwigs for 3 tissues × (5 histone marks + ATAC).
+  # Queries the ENCODE portal search API, picks the canonical fold-change-over-
+  # control bigwig per experiment, downloads to data/bigwigs/. Skips if cached.
+  03_fetch_bigwigs:
+    encode_portal: "https://www.encodeproject.org"
+    assembly: "GRCh38"
+    # Each entry produces one bigwig: biosample × assay × (target if ChIP).
+    # See stages.03_fetch_bigwigs.resolved_accessions for the pinned ENCFF list
+    # (populated on first run and committed thereafter for reproducibility).
+    targets:
+      - { biosample: "K562",    assay: "ATAC-seq",         target: null }
+      - { biosample: "GM12878", assay: "ATAC-seq",         target: null }
+      - { biosample: "HepG2",   assay: "ATAC-seq",         target: null }
+      - { biosample: "K562",    assay: "Histone ChIP-seq", target: "H3K4me1" }
+      - { biosample: "GM12878", assay: "Histone ChIP-seq", target: "H3K4me1" }
+      - { biosample: "HepG2",   assay: "Histone ChIP-seq", target: "H3K4me1" }
+      - { biosample: "K562",    assay: "Histone ChIP-seq", target: "H3K4me3" }
+      - { biosample: "GM12878", assay: "Histone ChIP-seq", target: "H3K4me3" }
+      - { biosample: "HepG2",   assay: "Histone ChIP-seq", target: "H3K4me3" }
+      - { biosample: "K562",    assay: "Histone ChIP-seq", target: "H3K27ac" }
+      - { biosample: "GM12878", assay: "Histone ChIP-seq", target: "H3K27ac" }
+      - { biosample: "HepG2",   assay: "Histone ChIP-seq", target: "H3K27ac" }
+      - { biosample: "K562",    assay: "Histone ChIP-seq", target: "H3K27me3" }
+      - { biosample: "GM12878", assay: "Histone ChIP-seq", target: "H3K27me3" }
+      - { biosample: "HepG2",   assay: "Histone ChIP-seq", target: "H3K27me3" }
+      - { biosample: "K562",    assay: "Histone ChIP-seq", target: "H3K9me3" }
+      - { biosample: "GM12878", assay: "Histone ChIP-seq", target: "H3K9me3" }
+      - { biosample: "HepG2",   assay: "Histone ChIP-seq", target: "H3K9me3" }
+    # Preferred output type for bigwigs. ENCODE's canonical normalized track.
+    preferred_output_type: "fold change over control"
+    # Populated by stage 03 on first run; keep in git so downstream stages pin
+    # to exact versions even if ENCODE re-releases.
+    resolved_accessions: {}
+
+  # Stage 04 — bigwig-based intrinsic features per focus_chromosome cCRE.
+  # Reads the 18 bigwigs from stage 03; outputs one wide parquet with:
+  #   - 15 mean fold-change scalars (5 histone marks × 3 tissues)
+  #   - 3 ATAC thumbnail vectors (100 bins × 3 tissues)
+  # Sequence-based features (FIMO, ChromHMM, phastCons) moved to stage 05.
+  04_extract_intrinsic:
+    atac_thumbnail_bins: 100
+
+  # Stage 05 — sequence-based intrinsic features per focus_chromosome cCRE.
+  # (FIMO motif scan, ChromHMM state intersect, phastCons mean.)
+  05_extract_sequence:
+    jaspar_motifs_url: "https://jaspar.genereg.net/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_meme.txt"
+    fimo_pvalue_threshold: 1.0e-4
+    fimo_top_n_per_ccre: 10
+    phastcons_url: "http://hgdownload.soe.ucsc.edu/goldenPath/hg38/phastCons100way/hg38.phastCons100way.bw"
+    chromhmm_source: "roadmap_15state"
+    chromhmm_urls:
+      K562:    "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E123_15_coreMarks_hg38lift_mnemonics.bed.gz"
+      GM12878: "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E116_15_coreMarks_hg38lift_mnemonics.bed.gz"
+      HepG2:   "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E118_15_coreMarks_hg38lift_mnemonics.bed.gz"
+
+  # Stage 06 — ENCODE cCRE V4 → target gene evidence (Tier A).
+  # Replaces the previous nearest-gene + GTEx / GWAS approach. Integrates
+  # ENCODE Registry V4 cCRE-Gene Links curated from direct experimental
+  # evidence (3D Chromatin contacts + eQTLs). CRISPR perturbation evidence
+  # also exists in V4 but has zero chr16 entries (CRISPRi tile-screens
+  # only cover chr3/10/12/19/X), so it's skipped for chr16-scoped output.
+  #
+  # Source: https://screen.wenglab.org/downloads
+  #   "cCRE-Gene Links (3D Chromatin, CRISPR, eQTLs).zip" (463 MB)
+  #   chr16-filtered TSVs pre-extracted into data/annotations/encode_gene_links/
+  06_target_evidence:
+    # Mapping from viz_chr16 token coords to current V4 EH38E accession:
+    # 94.5% match exact (chrom/start/end); fallback to highest-overlap-fraction
+    # match for tokens whose boundaries shifted slightly between releases.
+    min_overlap_fraction: 0.5
+
+  # Stage 07 — load the pretrained R2V universe + embeddings and tag with
+  # SCREEN overlap. Replaces the prior tokenize-then-train path; the demo
+  # uses the production embedding directly rather than retraining.
+  #
+  # Output: data/annotations/pretrained_universe.parquet — one row per
+  # pretrained region, with: token_id, chrom/start/end, SCREEN overlap flag,
+  # SCREEN class (null if no overlap), accession_hex (null if no overlap),
+  # 100-dim embedding vector.
+  #
+  # Tokens without SCREEN class are kept in the table but hidden by default
+  # in the viz (we don't know if they're regulatory or noise).
+  07_load_pretrained:
+    hf_model: "databio/r2v-encode-hg38"
+
+  # Stage 10 — featured-narrative data prep.
+  # For step-1/2/4 of the viz narrative: tokenize a curated set of BED files
+  # against the chr16 pretrained universe, slice by curated featured intervals,
+  # produce three viz-ready parquets.
+  10_featured_narrative:
+    # Featured intervals on chr16. Each one anchors a section of the narrative.
+    featured_intervals:
+      - id: "alpha_globin_genes"
+        chrom: "chr16"
+        start: 218000
+        end: 238000
+        label: "α-globin gene cluster"
+        narrative_caption: "20 kb on the actual α-globin gene cluster — HBA1 (chr16:226.7M), HBA2, HBQ1. Active-chromatin marks are present even in non-erythroid cells (this is a well-characterized open-chromatin domain). K562 ATAC + H3K27ac + H3K4me3 = canonical active-gene signature."
+      - id: "ciita_promoters"
+        chrom: "chr16"
+        start: 10960000
+        end: 10980000
+        label: "CIITA alternative promoters"
+        narrative_caption: "20 kb on the CIITA gene's four alternative promoters: pI (myeloid), pIII (B-cell, ~chr16:10.971M), pIV (IFN-γ inducible). GM12878 (B-cell line) shows the active-promoter signature at pIII; HepG2 (hepatocyte) is quiet here."
+      - id: "cdh1_promoter"
+        chrom: "chr16"
+        start: 68725000
+        end: 68745000
+        label: "CDH1 / E-cadherin promoter"
+        narrative_caption: "20 kb on the CDH1 promoter — TSS at chr16:68.737M, regulated by E-pal/E-box and CACCC elements. HepG2 (epithelial-derived) shows H3K4me3 + H3K27ac + ATAC at the active promoter. Methylation of this promoter silences CDH1 in many epithelial tumors."
+      - id: "fto_enhancer"
+        chrom: "chr16"
+        start: 53760000
+        end: 53780000
+        label: "FTO intron 1 enhancer"
+        narrative_caption: "20 kb covering the FTO intron 1 enhancer — rs1421085 sits at chr16:53.767M. The risk allele disrupts an ARID5B binding site, derepressing the enhancer to activate IRX3 / IRX5 ~1 Mb away (outside this window). The canonical 'nearest gene is wrong' case for noncoding GWAS variants."
+    # Featured BED files: pick one BED per (cell_line, target) from the
+    # rich-metadata-joined Tight subset, restricted to our 3 viz tissues +
+    # 6 marks (ATAC + 5 histones). Plus a small mystery sample.
+    featured_cell_lines:
+      - "K562"
+      - "GM12878"
+      - "HepG2"
+    featured_targets:
+      - null            # ATAC-seq has no target
+      - "H3K4me1"
+      - "H3K4me3"
+      - "H3K27ac"
+      - "H3K27me3"
+      - "H3K9me3"
+    # (cell_line, target) pairs to drop from the 3×6 grid — zero files in
+    # the 84,698 source pool, no sampling strategy can recover them.
+    skip_cells:
+      - ["GM12878", "H3K9me3"]
+    n_mystery_files: 4
+    mystery_seed: 42
+    # Match stage 07's hf_model so tokenizer vocab IDs align with
+    # pretrained_universe.parquet.
+    hf_model: "databio/r2v-encode-hg38"
+
+  # Stage 13 — Leiden community detection on per-stratum NPMI cooccurrence
+  # graphs. For each stratum, build an NPMI-weighted graph (edges above the
+  # threshold), run Leiden at gamma = 1.0 (locked-in decision #3), and emit
+  # per-token module assignments + per-module summaries. The AG cluster on
+  # chr16 should recover as a coherent module in at least one stratum
+  # (corpus_baseline / featured_lineage_HepG2 / tf_bound_pan_cell are the
+  # candidates given their 18/182 pairwise AG cohesion under NPMI).
+  13_modules:
+    npmi_threshold: 0.3          # edge filter; partners with NPMI < this are dropped
+    resolutions: [1.0]           # v1 hardcode (Locked-in decision #3)
+    centrality_method: "eigenvector"
+    random_seed: 42
+
+  # Stage 11 — tokenize the curated corpus, emit chr16 tokens AND mean
+  # file embeddings in a single pass. Streaming writer, batch_size to bound mem.
+  # File embeddings come from model.encode(rs, pooling="mean") — equivalent to
+  # mean-of-token-embeddings since R2V is Word2Vec-derived (no doc-vector).
+  11_tokenize_corpus_chr16:
+    hf_model: "databio/r2v-encode-hg38"
+    focus_chromosome: "chr16"
+    batch_size: 5000
+    drop_unk_only: true
+    embedding_pooling: "mean"
+
+  # Stage 12 — curated-strata PMI cooccurrence on chr16 tokens.
+  # For each named biological-question stratum, build a sparse (file × token)
+  # activation matrix, compute PPMI per token pair, keep top-K partners per
+  # focal token. Each stratum is a curated filter rule on the manifest;
+  # see plans/2026-04-28-grammar-of-regions-pipeline.md for rationale.
+  12_cooccurrence_pmi:
+    top_k_partners: 30
+    ppmi_threshold: 0.0          # drop pairs with PPMI <= this; 0 = keep all positive
+    min_files_active: 5          # statistical floor per (token, stratum)
+    chunk_size: 200              # tokens per slab in chunked sparse matmul
+    strata:
+      corpus_baseline:
+        filters: {}
+        description: "L1 — Corpus-wide baseline; no filter"
+      featured_lineage_K562:
+        filters:
+          cell_line: ["K562"]
+        description: "L2 — Full K562 slice (overall regulatory landscape, all assays)"
+      featured_lineage_GM12878:
+        filters:
+          cell_line: ["GM12878"]
+        description: "L2 — Full GM12878 slice (overall regulatory landscape, all assays)"
+      featured_lineage_HepG2:
+        filters:
+          cell_line: ["HepG2"]
+        description: "L2 — Full HepG2 slice (overall regulatory landscape, all assays)"
+      open_chromatin_pan_cell:
+        filters:
+          assay: ["DNase-seq", "ATAC-seq"]
+        description: "L3 — Accessible chromatin across cell types"
+      tf_bound_pan_cell:
+        filters:
+          assay: ["TF ChIP-seq"]
+        description: "L3 — TF-bound regions across all surveyed TFs"
+      active_enhancers_pan_cell:
+        filters:
+          target: ["H3K27ac", "H3K4me1"]
+        description: "L4 — Active enhancer signatures across cell types"
+      active_promoters_pan_cell:
+        filters:
+          target: ["H3K4me3"]
+        description: "L4 — Active promoter mark across cell types"
+      polycomb_repressed_pan_cell:
+        filters:
+          target: ["H3K27me3"]
+        description: "L4 — Polycomb-repressed regions across cell types"
+      heterochromatin_pan_cell:
+        filters:
+          target: ["H3K9me3"]
+        description: "L4 — Constitutive heterochromatin across cell types"
+      ctcf_boundaries:
+        filters:
+          target: ["CTCF"]
+        description: "L4 — CTCF-bound boundary elements"
+      erythroid_active:
+        filters:
+          cell_line: ["K562"]
+          target: ["H3K27ac", "H3K4me1", "H3K4me3"]
+        description: "L5 — Active chromatin in erythroid-lineage cells"
+      lymphoid_active:
+        filters:
+          cell_line: ["GM12878"]
+          target: ["H3K27ac", "H3K4me1", "H3K4me3"]
+        description: "L5 — Active chromatin in lymphoblastoid cells"
+      hepatic_active:
+        filters:
+          cell_line: ["HepG2"]
+          target: ["H3K27ac", "H3K4me1", "H3K4me3"]
+        description: "L5 — Active chromatin in hepatic cells"
+      # L6 — case-control contrast strata. Each combines two file populations
+      # whose biology is intentionally opposed (active vs repressive marks,
+      # or one lineage vs another). Designed to give canonical regulatory
+      # elements (which saturate in pure-narrow strata) a moderate marginal
+      # so PMI is informative. See implementation log in
+      # plans/2026-04-28-grammar-of-regions-pipeline.md.
+      active_vs_repressive_pan_cell:
+        filters:
+          target: ["H3K4me3", "H3K27ac", "H3K4me1", "H3K27me3", "H3K9me3"]
+        description: "L6 — Active marks vs repressive marks (pan-cell case-control)"
+      erythroid_vs_other_repressive:
+        filter_blocks:
+          - cell_line: ["K562"]
+            target: ["H3K4me3", "H3K27ac", "H3K4me1"]
+          - cell_line: ["GM12878", "HepG2"]
+            target: ["H3K27me3", "H3K9me3"]
+        description: "L6 — Erythroid-active vs non-erythroid-repressive case-control"
+      lymphoid_vs_other_repressive:
+        filter_blocks:
+          - cell_line: ["GM12878"]
+            target: ["H3K4me3", "H3K27ac", "H3K4me1"]
+          - cell_line: ["K562", "HepG2"]
+            target: ["H3K27me3", "H3K9me3"]
+        description: "L6 — Lymphoid-active vs non-lymphoid-repressive case-control"
+      hepatic_vs_other_repressive:
+        filter_blocks:
+          - cell_line: ["HepG2"]
+            target: ["H3K4me3", "H3K27ac", "H3K4me1"]
+          - cell_line: ["K562", "GM12878"]
+            target: ["H3K27me3", "H3K9me3"]
+        description: "L6 — Hepatic-active vs non-hepatic-repressive case-control"
+
+  # Stage 09 — prepare file-level viz data (file UMAP).
+  # Reads the 17k manifest + per-file mean embeddings from stage 11, runs UMAP
+  # locally with umap-learn. Replaces the prior approach of joining precomputed
+  # bedbase-umap coords (which were biased toward a different curated subset).
+  09_prepare_file_viz:
+    embeddings_relative: "data/precomputed/file_embeddings.parquet"
+    umap_n_neighbors: 15
+    umap_min_dist: 0.1
+    umap_n_components: 2
+    umap_seed: 42
+
+  # Stage 08 — UMAP and kNN on focus_chromosome tokens.
+  08_precompute_viz:
+    umap_n_neighbors: 15
+    umap_min_dist: 0.1
+    umap_seed: 42
+    knn_k: 30
+
+  # Stage 14 — bigwig signal slices at the featured intervals, for each
+  # featured file. Drives the "continuous → peaks → tokens" toggle in the
+  # genomic-regions viz Step 1: shows the raw signal track that the BED
+  # peaks were called from, then the peaks themselves, then the tokenized
+  # universe-projection — all over the same interval.
+  #
+  # Reads from local bigwig files when present (faster, deterministic);
+  # falls back to the manifest's URL for any (cell_line × target) that
+  # hasn't been downloaded yet, so the stage is runnable without first
+  # rerunning stage 03.
+  14_featured_signal:
+    n_bins: 200
+    # Which bigwig output_type to read; matches stage 03's choice.
+    preferred_output_type: "fold change over control"
+
+slurm:
+  account: "shefflab"
+  # Stage-specific SLURM overrides populated when we write the wrappers.
+  # 05_train_r2v:
+  #   partition: "gpu"
+  #   gres: "gpu:a100:1"
+  #   time: "04:00:00"
+  #   mem: "64GB"
