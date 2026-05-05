@@ -102,3 +102,31 @@ Total: 4 shape features + 1 density baseline, per (tissue, cCRE) pair.
 3. Scaffold a minimal project directory (e.g., `within-ccre-shape/`) under `spatial-region-features/` with `src/`, `data/`, `results/` once the plan is frozen.
 
 First implementation step after the plan is frozen: download the three ATAC bigwigs and the cCRE registry, verify the universe-to-tissue alignment works cleanly on a small subset (e.g., chr22 only), then scale to genome-wide feature extraction.
+
+## 2026-04-19 update — prior art and repositioning
+
+After a literature check (see [`../../dissertation/background/within-peak-shape.md`](../../dissertation/background/within-peak-shape.md)) the motivation for this pilot has shifted. Two pieces of prior art substantially overlap the question:
+
+- **Pundhir et al. 2016** (PARE, Nucleic Acids Research) showed that within-peak shape (valley depth `nfrDip`, peak-valley-peak asymmetry) on H3K4me1/H3K4me3 discriminates active enhancer vs active promoter and active vs poised elements at 0.89 specificity vs DEEP's 0.52 on 105/81 validated HeLa enhancers. Narrow marks + narrow task + narrow universe, but a direct "shape beats aggregate" precedent.
+- **Hentges et al. 2022** (LanceOtron, Bioinformatics) trains a "wide and deep" model that explicitly separates a shape branch (CNN on 2 kb bigwig coverage) from an aggregate enrichment branch (logreg on 11 enrichment-ratio scalars at multiple window sizes) and fuses them via an MLP. Beats MACS2 on F1 across ATAC, DNase, TF ChIP, histone ChIP. Task is peak-vs-noise, not cCRE class, but the architecture is directly transferable.
+- **Vu et al. 2023** (RCL, Genome Research) quote: "mean coverage as a simple score already does well... but RCL learns additional signals, perhaps peak shape, that further improve the performance."
+
+**Repositioning**: the pilot's motivation is no longer "does shape carry signal beyond aggregates" — Pundhir and LanceOtron have settled the yes at narrow scope. The sharper residual claim is "does shape carry signal across the full SCREEN 5-way cCRE taxonomy, with multi-track inputs, at registry scale, against a modern max-Z baseline." That is genuinely untested. But the answer is now strongly predicted (yes), which shrinks the novelty of this pilot considerably.
+
+**Practical consequence**: the pilot is more usefully run as an **exercise + infrastructure build** than as a standalone paper contribution. Keep the scope tight, borrow the LanceOtron wide+deep ablation template explicitly (shape features vs aggregate features vs combined), and treat the run primarily as calibration for the R2V comparison pilot ([`./2026-04-19-r2v-token-content-comparison.md`](./2026-04-19-r2v-token-content-comparison.md)), which addresses the part LanceOtron does not touch (tokenization-based embeddings).
+
+**Additions to the feature set**. The current 5 features (summit position, summit sharpness, signal concentration, edge-to-core ratio, total signal) should be augmented with Pundhir's validated features:
+
+- **`nfrDip`** — valley depth between the two flanking summits (the PVP valley). The current `edge-to-core ratio` is a coarser cousin; run both.
+- **PVP asymmetry** — ratio of upstream to downstream flanking-summit heights. Only meaningful for strand-aware tracks (H3K4me3 mostly). Captures TSS-directionality information that Pundhir showed correlates with GRO-seq (ρ=0.45) and CAGE (ρ=0.63).
+
+Add these as a baseline arm, since skipping them leaves the obvious reviewer question ("did your feature set include the known-good features?") unanswered.
+
+**BED-vs-bigwig arm justified**. The BED-vs-bigwig comparison we added (pilot of what binary peak input captures vs continuous signal) is empirically predicted by Vu 2023's finding that learned shape adds signal above mean coverage on the same interval. Keep this arm; it now has an adjacent precedent to cite.
+
+**Remaining genuine contributions** (what is not-yet-settled):
+
+- Multi-track shape features (jointly across ATAC + H3K27ac + H3K4me1 + H3K4me3 + H3K27me3 + DNase), not the single-track that Pundhir and LanceOtron tested.
+- 5-way SCREEN classification including CTCF-only and DNase-H3K4me3, not the binary/ternary that Pundhir tested.
+- Full registry scale (~2.3 M rDHSs), not the ~200 hand-validated intervals Pundhir used.
+- Tissue-matching decomposition — does shape predict class consistently across tissues, or is the shape signature tissue-dependent?

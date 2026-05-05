@@ -103,7 +103,7 @@ def intersect_with_screen(
 
 
 def main() -> None:
-    ctx = stage_start("07_load_pretrained", __doc__)
+    ctx = stage_start("05_load_pretrained", __doc__)
     sc = ctx.stage_cfg
 
     hf_model = sc["hf_model"]

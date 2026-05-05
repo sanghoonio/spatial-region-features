@@ -184,7 +184,7 @@ def load_eqtl(path: Path) -> pl.DataFrame:
 
 
 def main() -> None:
-    ctx = stage_start("06_target_evidence", __doc__)
+    ctx = stage_start("04_target_evidence", __doc__)
     sc = ctx.stage_cfg
     paths = sc["paths"]
 

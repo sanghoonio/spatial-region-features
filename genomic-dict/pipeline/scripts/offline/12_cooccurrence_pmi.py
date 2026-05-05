@@ -18,7 +18,7 @@ Algorithm per stratum:
 
 Reads:
   data/corpus/manifest.parquet                    (from stage 01; cell_line, assay, target)
-  data/annotations/tokenized_corpus_chr16.parquet (from stage 11; chr16 token lists)
+  data/precomputed/tokenized_corpus_chr16.parquet (from stage 11; chr16 token lists)
 Writes:
   data/precomputed/region_cooccurrence_pmi.parquet
     schema: (token_id, stratum, n_files_in_stratum, n_files_active,
@@ -226,13 +226,31 @@ def compute_stratum_top_k(
                 file=sys.stderr,
             )
 
+    # Per-token marginals — one row per chr16 token regardless of partner
+    # ranking. Powers stratum-population brushing in the viz (canvas2):
+    # define "active in stratum" by frac_active threshold, then subset the
+    # UMAP to that population without needing a per-anchor query.
+    marginal_rows: list[dict[str, Any]] = []
+    for tok_idx in range(n_tokens):
+        n_active = int(n_per_token[tok_idx])
+        if n_active == 0:
+            continue
+        marginal_rows.append({
+            "token_id": int(chr16_tokens_arr[tok_idx]),
+            "stratum": stratum_name,
+            "n_files_in_stratum": int(n_files),
+            "n_files_active": n_active,
+            "frac_active": float(n_active) / float(n_files),
+        })
+
     metrics = {
         "n_files": int(n_files),
         "n_tokens_passing_floor": int(n_keep),
         "n_tokens_emitted": len(rows_out),
+        "n_marginal_rows": len(marginal_rows),
         "elapsed_seconds": round(time.time() - t_start, 2),
     }
-    return rows_out, metrics
+    return rows_out, marginal_rows, metrics
 
 
 def main() -> None:
@@ -241,10 +259,11 @@ def main() -> None:
 
     paths = sc["paths"]
     manifest_path = PROJECT_ROOT / paths["corpus_dir"] / "manifest.parquet"
-    tokenized_path = PROJECT_ROOT / paths["annotations_dir"] / "tokenized_corpus_chr16.parquet"
+    tokenized_path = PROJECT_ROOT / paths["precomputed_dir"] / "tokenized_corpus_chr16.parquet"
     viz_chr16_path = PROJECT_ROOT / paths["precomputed_dir"] / "viz_chr16.parquet"
     precomp_dir = PROJECT_ROOT / paths["precomputed_dir"]
     out_path = precomp_dir / "region_cooccurrence_pmi.parquet"
+    marginals_path = precomp_dir / "region_stratum_marginals.parquet"
 
     inputs = [
         file_record(manifest_path),
@@ -302,6 +321,7 @@ def main() -> None:
         print(f"  X shape={X.shape}, nnz={X.nnz:,}", file=sys.stderr)
 
         all_rows: list[dict[str, Any]] = []
+        all_marginals: list[dict[str, Any]] = []
         per_stratum_metrics: dict[str, dict[str, Any]] = {}
 
         for stratum_name, stratum_def in strata_cfg.items():
@@ -318,7 +338,7 @@ def main() -> None:
                 per_stratum_metrics[stratum_name] = {"n_files": 0, "n_tokens_emitted": 0}
                 continue
             X_sub = X[row_idx, :]
-            rows, metrics = compute_stratum_top_k(
+            rows, marginal_rows, metrics = compute_stratum_top_k(
                 X_sub, chr16_tokens_arr,
                 top_k=top_k,
                 ppmi_threshold=ppmi_threshold,
@@ -327,6 +347,7 @@ def main() -> None:
                 stratum_name=stratum_name,
             )
             all_rows.extend(rows)
+            all_marginals.extend(marginal_rows)
             per_stratum_metrics[stratum_name] = metrics
 
         print(f"\nwriting output: {len(all_rows):,} rows total", file=sys.stderr)
@@ -349,8 +370,32 @@ def main() -> None:
         )
         precomp_dir.mkdir(parents=True, exist_ok=True)
         out_df.write_parquet(out_path)
-        outputs = [file_record(out_path, record_count=len(out_df))]
         print(f"  wrote {out_path} ({out_path.stat().st_size / 1e6:.1f} MB)", file=sys.stderr)
+
+        # Per-token marginals: one row per (token, stratum) where the token
+        # is active in at least one file. Used by canvas2 to subset the UMAP
+        # to a stratum-active population for brushing.
+        marginals_df = pl.DataFrame(
+            all_marginals,
+            schema={
+                "token_id": pl.Int64,
+                "stratum": pl.Utf8,
+                "n_files_in_stratum": pl.Int64,
+                "n_files_active": pl.Int64,
+                "frac_active": pl.Float64,
+            },
+        )
+        marginals_df.write_parquet(marginals_path)
+        print(
+            f"  wrote {marginals_path} ({marginals_path.stat().st_size / 1e6:.1f} MB, "
+            f"{len(marginals_df):,} rows)",
+            file=sys.stderr,
+        )
+
+        outputs = [
+            file_record(out_path, record_count=len(out_df)),
+            file_record(marginals_path, record_count=len(marginals_df)),
+        ]
 
         metrics: dict[str, Any] = {
             "n_files_joined": int(n_joined),

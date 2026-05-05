@@ -59,10 +59,10 @@ uv sync                       # once, at root
 brew install bedtools         # once, for deeptools interop
 ```
 
-Scripts in this dir use **relative paths** (e.g. `data/...`, `outputs/...`), so run them from inside `scratch/`; `uv` walks up to the root `pyproject.toml` and uses the root env automatically:
+Scripts in this dir use **relative paths** (e.g. `data/...`, `outputs/...`), so run them from inside `scratch/chr22_demo/`; `uv` walks up to the root `pyproject.toml` and uses the root env automatically:
 
 ```bash
-cd scratch
+cd scratch/chr22_demo
 uv run python scripts/fetch_chr22_bigwigs.py
 ```
 

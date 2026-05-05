@@ -50,6 +50,7 @@ def select_featured_files(
     targets: list[str | None],
     skip_cells: list[tuple[str, str]],
     seed: int,
+    bigwig_manifest: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Pick one BED file per (cell_line, target) with rich metadata.
 
@@ -57,7 +58,14 @@ def select_featured_files(
     ATAC-seq files have target = NULL; histone ChIP files have target set.
     skip_cells: (cell_line, target) pairs known to have zero files in the
     source pool (e.g., GM12878 H3K9me3) — drop from the grid silently.
-    Sampling deterministically: pick the file with the smallest id within each group.
+
+    Selection rule (per pool):
+      1. drop rows with null number_of_regions (broken / non-peak files)
+      2. prefer rows whose name/description contain the bigwig manifest's
+         experiment_accession for this (cell, target) — keeps BED peaks and
+         displayed bigwig signal sourced from the same ENCODE experiment
+      3. order by number_of_regions DESC, id ASC (deterministic)
+      4. take the head — fall back to the original hash-sort if pool empties
     """
     skip_set = {(cl, tgt) for cl, tgt in skip_cells}
     selected: list[dict] = []
@@ -66,12 +74,13 @@ def select_featured_files(
             if tgt is not None and (cl, tgt) in skip_set:
                 continue
             if tgt is None:
-                # ATAC-seq: filter by assay, ignore target
+                key = f"{cl}__ATAC"
                 pool = manifest.filter(
                     (pl.col("cell_line") == cl)
                     & (pl.col("assay") == "ATAC-seq")
                 )
             else:
+                key = f"{cl}__{tgt}"
                 pool = manifest.filter(
                     (pl.col("cell_line") == cl)
                     & (pl.col("target") == tgt)
@@ -80,7 +89,38 @@ def select_featured_files(
             if len(pool) == 0:
                 print(f"  WARN: no file found for ({cl}, {tgt or 'ATAC'})", file=sys.stderr)
                 continue
-            row = pool.sort("id").head(1).to_dicts()[0]
+
+            quality_pool = pool.filter(pl.col("number_of_regions").is_not_null())
+            picked_pool = quality_pool
+
+            bw_exp = (bigwig_manifest or {}).get(key, {}).get("experiment_accession")
+            if bw_exp and quality_pool.height > 0:
+                same_exp = quality_pool.filter(
+                    pl.col("description").str.contains(bw_exp).fill_null(False)
+                    | pl.col("name").str.contains(bw_exp).fill_null(False)
+                )
+                if same_exp.height > 0:
+                    picked_pool = same_exp
+
+            if picked_pool.height > 0:
+                row = (
+                    picked_pool.sort(
+                        ["number_of_regions", "id"],
+                        descending=[True, False],
+                        nulls_last=True,
+                    )
+                    .head(1)
+                    .to_dicts()[0]
+                )
+            else:
+                # No file with peak metadata — fall back to original hash-sort.
+                print(
+                    f"  WARN: no peak-annotated file for ({cl}, {tgt or 'ATAC'}); "
+                    f"falling back to lexicographic id sort",
+                    file=sys.stderr,
+                )
+                row = pool.sort("id").head(1).to_dicts()[0]
+
             row["_target_label"] = tgt or "ATAC-seq"
             row["_role"] = "featured"
             selected.append(row)
@@ -117,13 +157,14 @@ def tokens_in_interval(
 
 
 def main() -> None:
-    ctx = stage_start("10_featured_narrative", __doc__)
+    ctx = stage_start("08_featured_narrative", __doc__)
     sc = ctx.stage_cfg
 
     paths = sc["paths"]
     manifest_path = PROJECT_ROOT / paths["corpus_dir"] / "manifest.parquet"
     viz_files_path = PROJECT_ROOT / paths["precomputed_dir"] / "viz_files.parquet"
     pretrained_path = PROJECT_ROOT / paths["annotations_dir"] / "pretrained_universe.parquet"
+    bigwig_manifest_path = PROJECT_ROOT / paths["annotations_dir"] / "bigwig_manifest.yaml"
     precomp_dir = PROJECT_ROOT / paths["precomputed_dir"]
 
     out_intervals = precomp_dir / "featured_intervals.parquet"
@@ -138,6 +179,7 @@ def main() -> None:
         file_record(manifest_path),
         file_record(viz_files_path),
         file_record(pretrained_path),
+        file_record(bigwig_manifest_path),
     ]
 
     bbclient_cache = os.environ.get("BBCLIENT_CACHE")
@@ -158,7 +200,15 @@ def main() -> None:
         # --- Pick featured files -------------------------------------------------
         manifest = pl.read_parquet(manifest_path)
         viz_files = pl.read_parquet(viz_files_path)
-        featured = select_featured_files(manifest, cell_lines, targets, skip_cells, seed)
+        bigwig_manifest: dict[str, dict] = {}
+        if bigwig_manifest_path.exists():
+            import yaml
+            with open(bigwig_manifest_path) as f:
+                bigwig_manifest = yaml.safe_load(f).get("entries", {}) or {}
+        featured = select_featured_files(
+            manifest, cell_lines, targets, skip_cells, seed,
+            bigwig_manifest=bigwig_manifest,
+        )
         mystery = select_mystery_files(viz_files, n_mystery, seed)
         all_files = featured + mystery
         print(

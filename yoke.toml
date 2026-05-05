@@ -1,0 +1,22 @@
+# Yoke configuration for the spatial-region-features workspace.
+# Used for `yoke connect` — SSH control master + REPL scoped to this project.
+# File syncing stays on the rsync scripts at workspace root (./sync.sh and
+# ./pull-results.sh) since mutagen is not installed. Reinstate the sync-start
+# flow later by installing mutagen (`brew install mutagen-io/mutagen/mutagen`)
+# and running `yoke sync start`.
+#
+# Common commands (run from this directory):
+#   yoke connect         # open session (SSH control master + REPL)
+#   yoke sessions        # list active yoke sessions
+#   yoke disconnect      # tear down session
+
+name = "spatial-region-features"
+remote = "sp5fd@login.hpc.virginia.edu"
+
+# Where the project lives on Rivanna. Same path our sync.sh targets, so both
+# tools land on the same tree.
+remote_cwd = "/home/sp5fd/spatial-region-features"
+
+# Lab brickyard (used by `yoke bricks` and related commands).
+# Default is /project/shefflab/brickyard — listed explicitly for clarity.
+brickyard_root = "/project/shefflab/brickyard"

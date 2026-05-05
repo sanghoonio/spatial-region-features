@@ -78,7 +78,7 @@ def open_bigwig(entry: dict[str, Any]) -> tuple["pyBigWig.pyBigWig", str]:
 
 
 def main() -> None:
-    ctx = stage_start("14_featured_signal", __doc__)
+    ctx = stage_start("09_featured_signal", __doc__)
     sc = ctx.stage_cfg
 
     n_bins = int(sc.get("n_bins", 200))

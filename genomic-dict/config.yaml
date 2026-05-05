@@ -127,28 +127,11 @@ stages:
     # to exact versions even if ENCODE re-releases.
     resolved_accessions: {}
 
-  # Stage 04 — bigwig-based intrinsic features per focus_chromosome cCRE.
-  # Reads the 18 bigwigs from stage 03; outputs one wide parquet with:
-  #   - 15 mean fold-change scalars (5 histone marks × 3 tissues)
-  #   - 3 ATAC thumbnail vectors (100 bins × 3 tissues)
-  # Sequence-based features (FIMO, ChromHMM, phastCons) moved to stage 05.
-  04_extract_intrinsic:
-    atac_thumbnail_bins: 100
+  # Stages 04 (extract_intrinsic) and 05 (extract_sequence) removed in the
+  # 2026-04-29 cleanup — neither output is consumed downstream after stage 08
+  # dropped its bigwig-mean dependency. See plans/2026-04-29-bed-route-precompute-strip.md.
 
-  # Stage 05 — sequence-based intrinsic features per focus_chromosome cCRE.
-  # (FIMO motif scan, ChromHMM state intersect, phastCons mean.)
-  05_extract_sequence:
-    jaspar_motifs_url: "https://jaspar.genereg.net/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_meme.txt"
-    fimo_pvalue_threshold: 1.0e-4
-    fimo_top_n_per_ccre: 10
-    phastcons_url: "http://hgdownload.soe.ucsc.edu/goldenPath/hg38/phastCons100way/hg38.phastCons100way.bw"
-    chromhmm_source: "roadmap_15state"
-    chromhmm_urls:
-      K562:    "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E123_15_coreMarks_hg38lift_mnemonics.bed.gz"
-      GM12878: "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E116_15_coreMarks_hg38lift_mnemonics.bed.gz"
-      HepG2:   "https://egg2.wustl.edu/roadmap/data/byFileType/chromhmmSegmentations/ChmmModels/coreMarks/jointModel/final/E118_15_coreMarks_hg38lift_mnemonics.bed.gz"
-
-  # Stage 06 — ENCODE cCRE V4 → target gene evidence (Tier A).
+  # Stage 04 — ENCODE cCRE V4 → target gene evidence (Tier A).
   # Replaces the previous nearest-gene + GTEx / GWAS approach. Integrates
   # ENCODE Registry V4 cCRE-Gene Links curated from direct experimental
   # evidence (3D Chromatin contacts + eQTLs). CRISPR perturbation evidence
@@ -158,13 +141,13 @@ stages:
   # Source: https://screen.wenglab.org/downloads
   #   "cCRE-Gene Links (3D Chromatin, CRISPR, eQTLs).zip" (463 MB)
   #   chr16-filtered TSVs pre-extracted into data/annotations/encode_gene_links/
-  06_target_evidence:
+  04_target_evidence:
     # Mapping from viz_chr16 token coords to current V4 EH38E accession:
     # 94.5% match exact (chrom/start/end); fallback to highest-overlap-fraction
     # match for tokens whose boundaries shifted slightly between releases.
     min_overlap_fraction: 0.5
 
-  # Stage 07 — load the pretrained R2V universe + embeddings and tag with
+  # Stage 05 — load the pretrained R2V universe + embeddings and tag with
   # SCREEN overlap. Replaces the prior tokenize-then-train path; the demo
   # uses the production embedding directly rather than retraining.
   #
@@ -175,14 +158,14 @@ stages:
   #
   # Tokens without SCREEN class are kept in the table but hidden by default
   # in the viz (we don't know if they're regulatory or noise).
-  07_load_pretrained:
+  05_load_pretrained:
     hf_model: "databio/r2v-encode-hg38"
 
-  # Stage 10 — featured-narrative data prep.
+  # Stage 08 — featured-narrative data prep.
   # For step-1/2/4 of the viz narrative: tokenize a curated set of BED files
   # against the chr16 pretrained universe, slice by curated featured intervals,
   # produce three viz-ready parquets.
-  10_featured_narrative:
+  08_featured_narrative:
     # Featured intervals on chr16. Each one anchors a section of the narrative.
     featured_intervals:
       - id: "alpha_globin_genes"
@@ -209,6 +192,31 @@ stages:
         end: 53780000
         label: "FTO intron 1 enhancer"
         narrative_caption: "20 kb covering the FTO intron 1 enhancer — rs1421085 sits at chr16:53.767M. The risk allele disrupts an ARID5B binding site, derepressing the enhancer to activate IRX3 / IRX5 ~1 Mb away (outside this window). The canonical 'nearest gene is wrong' case for noncoding GWAS variants."
+      # Hub-candidate intervals — surfaced from the cross-arm scan in the
+      # Observable canvas. Each anchors a region whose top NPMI partners
+      # cluster on a distant arm, hinting at long-range regulatory
+      # structure. These were previously hard-coded in the React app
+      # (candidateIntervals.ts); now they go through the pipeline so they
+      # get the same wiggle/peaks/tokens treatment as the four reference
+      # intervals above.
+      - id: "hub_21_4_to_29"
+        chrom: "chr16"
+        start: 21350000
+        end: 21370000
+        label: "21.4 Mb dELS hub → 16p11.2"
+        narrative_caption: "20 kb on 16p12.3 just upstream of CRYM (μ-crystallin / NADP-regulated thyroid hormone–binding protein). The window is candidate-rich and every overlapping element falls in the dELS (distal enhancer-like) SCREEN class, consistent with cell-type-specific enhancer activity."
+      - id: "hub_88_2_to_29"
+        chrom: "chr16"
+        start: 88230000
+        end: 88250000
+        label: "88.2 Mb (16q24.3) → 16p11.2 cross-arm hub"
+        narrative_caption: "20 kb on 16q24.3 between ZNF469 and GALNS. ZNF469 encodes a regulator of the corneal extracellular matrix (loss-of-function causes brittle cornea syndrome); GALNS is the lysosomal sulfatase whose loss causes mucopolysaccharidosis IVA (Morquio A syndrome). The window itself is densely populated by candidate cis-regulatory elements."
+      - id: "hub_15_1_to_2"
+        chrom: "chr16"
+        start: 15130000
+        end: 15150000
+        label: "15.1 Mb dELS hub → 16p13.3"
+        narrative_caption: "20 kb on 16p13.11 inside the NPIP (nuclear pore complex–interacting protein) segmental duplication family. NPIP segdups are the breakpoints of the recurrent 16p13.11 microdeletion / microduplication syndromes. Short-read alignment to multi-copy segdups is intrinsically ambiguous, so any region-level signal here should be read with caution."
     # Featured BED files: pick one BED per (cell_line, target) from the
     # rich-metadata-joined Tight subset, restricted to our 3 viz tissues +
     # 6 marks (ATAC + 5 histones). Plus a small mystery sample.
@@ -246,16 +254,20 @@ stages:
     centrality_method: "eigenvector"
     random_seed: 42
 
-  # Stage 11 — tokenize the curated corpus, emit chr16 tokens AND mean
+  # Stage 06 — tokenize the curated corpus, emit chr16 tokens AND mean
   # file embeddings in a single pass. Streaming writer, batch_size to bound mem.
   # File embeddings come from model.encode(rs, pooling="mean") — equivalent to
   # mean-of-token-embeddings since R2V is Word2Vec-derived (no doc-vector).
-  11_tokenize_corpus_chr16:
+  06_tokenize_corpus_chr16:
     hf_model: "databio/r2v-encode-hg38"
     focus_chromosome: "chr16"
     batch_size: 5000
     drop_unk_only: true
     embedding_pooling: "mean"
+    # File UMAP knobs (folded in from former stage 09).
+    files_umap_n_neighbors: 15
+    files_umap_min_dist: 0.1
+    files_umap_seed: 42
 
   # Stage 12 — curated-strata PMI cooccurrence on chr16 tokens.
   # For each named biological-question stratum, build a sparse (file × token)
@@ -358,25 +370,20 @@ stages:
             target: ["H3K27me3", "H3K9me3"]
         description: "L6 — Hepatic-active vs non-hepatic-repressive case-control"
 
-  # Stage 09 — prepare file-level viz data (file UMAP).
-  # Reads the 17k manifest + per-file mean embeddings from stage 11, runs UMAP
-  # locally with umap-learn. Replaces the prior approach of joining precomputed
-  # bedbase-umap coords (which were biased toward a different curated subset).
-  09_prepare_file_viz:
-    embeddings_relative: "data/precomputed/file_embeddings.parquet"
-    umap_n_neighbors: 15
-    umap_min_dist: 0.1
-    umap_n_components: 2
-    umap_seed: 42
+  # Stage 09 (prepare_file_viz) folded into stage 06 — the per-file embeddings
+  # are computed there, so the file UMAP is now produced in the same pass.
+  # See `files_umap_*` keys under 11_tokenize_corpus_chr16.
 
-  # Stage 08 — UMAP and kNN on focus_chromosome tokens.
-  08_precompute_viz:
+  # Stage 07 — UMAP, kNN, and BED-derived concept axes on focus_chromosome
+  # tokens. Absorbed the standalone embedding_features.py (concept axes) and
+  # dropped the stage-04 intrinsic-bigwig dependency.
+  07_precompute_viz:
     umap_n_neighbors: 15
     umap_min_dist: 0.1
     umap_seed: 42
     knn_k: 30
 
-  # Stage 14 — bigwig signal slices at the featured intervals, for each
+  # Stage 09 — bigwig signal slices at the featured intervals, for each
   # featured file. Drives the "continuous → peaks → tokens" toggle in the
   # genomic-regions viz Step 1: shows the raw signal track that the BED
   # peaks were called from, then the peaks themselves, then the tokenized
@@ -386,7 +393,7 @@ stages:
   # falls back to the manifest's URL for any (cell_line × target) that
   # hasn't been downloaded yet, so the stage is runnable without first
   # rerunning stage 03.
-  14_featured_signal:
+  09_featured_signal:
     n_bins: 200
     # Which bigwig output_type to read; matches stage 03's choice.
     preferred_output_type: "fold change over control"

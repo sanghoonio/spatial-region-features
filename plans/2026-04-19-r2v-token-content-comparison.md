@@ -115,3 +115,27 @@ This experiment decomposes R2V's cCRE-aggregated semantics; any clean decomposit
 3. Decide whether to run tissue-averaged content first (as drafted) or tissue-stratified from the start.
 
 **Sequencing relative to the first pilot.** These experiments can run in parallel logically, but the first pilot's content-extraction pipeline is the upstream dependency. Cleanest path: build the pipeline once for the first pilot, reuse for this experiment, so the two plans share their infrastructure cost.
+
+## 2026-04-19 update — LanceOtron as architectural precedent, sharpened hypotheses
+
+The literature check in [`../../dissertation/background/within-peak-shape.md`](../../dissertation/background/within-peak-shape.md) surfaced a useful conceptual anchor for this pilot. Hentges et al. 2022 (LanceOtron) trains a **"wide and deep"** model that combines two parallel input branches for the same region — a CNN on continuous shape and a logistic regression on aggregate enrichment scalars — fused by an MLP. The paper shows combining the two beats either alone for peak-vs-noise discrimination.
+
+**Transferred to the R2V setting**, this pilot's three-way comparison (R2V-derived embedding, within-cCRE content vector, concatenated `[R2V; content]`) is the same design principle applied at a different granularity:
+
+- R2V corresponds to LanceOtron's aggregate/corpus-level branch (cross-file co-occurrence is the "wide" view — many tokens, summarized relationally).
+- Within-cCRE content corresponds to LanceOtron's shape branch (within-interval continuous structure is the "deep" view — one token, fine-resolution).
+- The two branches encode **orthogonal** information: R2V cannot see shape (binary BED input); a content encoder cannot see cross-file co-occurrence (single-interval input). The combination is a content-aware token embedding.
+
+**This sharpens the predictions** in Step A (formerly "informative outcomes, not pass/fail"). Given LanceOtron's mechanism and Pundhir 2016's shape-beats-aggregate finding, we can now state directional predictions:
+
+1. **F1_content > F1_R2V on cCRE class prediction (PLS / pELS / dELS).** Class is substantially determined by within-interval shape (promoter vs enhancer peak architecture, bimodal H3K4me3 flanking, mark deposition patterns) — exactly the axis R2V cannot see. Pundhir 2016 + LanceOtron directly support this prediction.
+2. **F1_R2V > F1_content on tissue-activity prediction** (which tissues is this cCRE active in). Tissue identity is a cross-file co-occurrence property that R2V is structurally built to capture; shape is tissue-specific but the corpus-level signal carries identity more cleanly than within-interval shape alone.
+3. **F1_combined > max(F1_R2V, F1_content)** on both tasks. This is the LanceOtron wide-and-deep result at embedding granularity — two orthogonal branches combine into a richer representation than either alone.
+
+**This is where the genuine novelty lives.** LanceOtron's published work does not test tokenization-based embeddings at all; its aggregate branch is just enrichment-ratio scalars, not a distributional embedding. So comparing R2V-style co-occurrence against within-interval content is a contribution that LanceOtron does not pre-empt. By contrast, the within-cCRE shape pilot ([`./2026-04-19-within-ccre-shape-pilot.md`](./2026-04-19-within-ccre-shape-pilot.md)) is largely predicted by prior art; this pilot is where new ground is broken.
+
+**Step B influence-attribution is untouched by the prior art**: Pundhir and LanceOtron do not attempt to characterize what an embedding method implicitly weights when aggregating to file-level. Step B's leave-one-out cCRE attribution remains novel.
+
+**Tissue-activity task needed.** Step A currently focuses on cCRE class prediction. To test prediction #2 above, add a second classification task: **given a cCRE, predict which of K562 / GM12878 / HepG2 it is maximally active in** (or the binary active-in-tissue task per tissue). This should rely on the per-tissue content features that are already an optional extension in the current draft; promote them from optional to required under this repositioning. Use the ATAC activity thresholds from `01_select_ccres.py` as the tissue-activity ground truth.
+
+**Revised status**: this pilot is now positioned as **the primary novelty-bearing experiment** in the workspace, with the within-cCRE shape pilot recast as an exercise/infrastructure-build that calibrates the content-extraction pipeline this pilot depends on.

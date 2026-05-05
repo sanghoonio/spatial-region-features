@@ -28,6 +28,9 @@ venv/
 *.swo
 *~
 
+# Claude Code per-project state (scheduled tasks, local settings)
+.claude/
+
 # Experiment artifacts — regenerable from source code or remote data
 # Applied at any depth under the workspace (scratch/, future experiment dirs).
 # Override for specific small files with `git add -f <path>` if genuinely worth tracking.
